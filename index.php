@@ -82,19 +82,19 @@ class ParseWriteData
             if (is_string($settings['nameLogDirectory']) || is_numeric($settings['nameLogDirectory'])) {
                 $this->nameLogDirectory = $settings['nameLogDirectory'];
             } else {
-                $this->nameLogDirectory = 'logs/' .
-                    (date('d') + date('m') + date('y')) .
-                    '__' . date('dmy_Hi') . '__' . crc32(date("dmyHis")) .
-                    DIRECTORY_SEPARATOR;
+                $this->nameLogDirectory = 'logs/' . '__' . date('ymd_Hi') . DIRECTORY_SEPARATOR;
             }
 
-            if (is_string($settings['nameLogDirectory']) || is_numeric($settings['nameLogDirectory'])){
-                if(strpos($settings['nameLogDirectory'], '.json', -5)){
-                    
+            if (is_string($settings['nameLogFile']) || is_numeric($settings['nameLogFile'])){
+                $this->nameLogFile = $settings['nameLogFile'];
+                if(strpos($this->nameLogFile, '.json', -5) === false){
+                    $this->nameLogFile .= '.json';
                 }
+            } else{
+                $this->nameLogFile = date('dmy__H-i') . crc32(microtime(true)) . '.json';
             }
 
-
+            mkdir($this->nameLogDirectory);
         } else {
 
         }
