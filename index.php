@@ -1,20 +1,104 @@
 <?php
 /**
- * Получение и декодирование json от введенного url адреса.
+ * Получение данных от сервера по заданному url.
+ *
+ *
  *
  *
  * @param string $url url адрес с get параметрами (если нужно)
+ * Пример передаваемого url:
+ * 'http://ya.ru '
+ * @param boolean $isJson нужно ли парсить данные как джейсон формат
+ * @param boolean|array $curlOption параметры (username, password) для авторизации на сайте используя cURL (false если нет надабности использовать)
+ * Пример передаваемых параметров:
+ * ['username'=> 'admin', 'password'=>'12345678']
  * @return array декодированные данные
  */
-function getData($url)
+function getData($url, $isJson = true, $curlOption = false)
 {
     for ($i = 0; $i < 4; $i++) {
-        $data = json_decode(file_get_contents($url), true);
-        if (is_array($data)) {
-            return $data;
+        if (!$curlOption) {
+            $data = file_get_contents($url);
+        } else {
+            if (!empty($curlOption['username']) && !empty($curlOption['password'])) {
+                $ch = curl_init();
+                if (strtolower((substr($url, 0, 5)) == 'https')) { // если соединяемся с https
+                    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, 0);
+                    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 0);
+                }
+                curl_setopt($ch, CURLOPT_URL, $url);
+                curl_setopt($ch, CURLOPT_POST, 1);
+                curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+                curl_setopt($ch, CURLOPT_USERAGENT, "Mozilla/4.0 (Windows; U; Windows NT 5.0; En; rv:1.8.0.2) Gecko/20070306 Firefox/1.0.0.4");
+                curl_setopt($ch, CURLOPT_USERPWD, $curlOption['username'] . ':' . $curlOption['password']);
+                $result = curl_exec($ch);
+
+                curl_close($ch);
+
+                if ($isJson) {
+                    $result = json_decode($result, true);
+                    if (is_array($result)) {
+                        return $result;
+                    }
+                }
+
+                return $result;
+            }
         }
+
+        if ($isJson) {
+            $data = json_decode($data, true);
+            if (is_array($data)) {
+                return $data;
+            }
+        }
+        return $data;
     }
     throw new Exception('Не могу получить данные от сайта: ' . $url . PHP_EOL);
+
+}
+
+class ParseWriteData
+{
+    private $logs = [];
+    private $nameLogDirectory;
+    private $nameLogFile;
+
+    //settings -> nameLogFile, option for connect om postgres,
+
+    public function __construct($settings = false)
+    {
+        $keys = ['logging', 'nameLogDirectory', 'NLD', 'nameLogFile', 'NLF'];
+        $replaceEmptyValuesKeysTrue = ['logging'];
+        foreach ($keys as $key) {
+            if (empty($settings[$key])) {
+                $settings[$key] = in_array($key, $replaceEmptyValuesKeysTrue);
+            }
+        }
+
+        if ($settings['logging'] === true) {
+            $this->logs['time_start'] = date('d.m.y H:i:s');
+
+            if (is_string($settings['nameLogDirectory']) || is_numeric($settings['nameLogDirectory'])) {
+                $this->nameLogDirectory = $settings['nameLogDirectory'];
+            } else {
+                $this->nameLogDirectory = 'logs/' .
+                    (date('d') + date('m') + date('y')) .
+                    '__' . date('dmy_Hi') . '__' . crc32(date("dmyHis")) .
+                    DIRECTORY_SEPARATOR;
+            }
+
+            if (is_string($settings['nameLogDirectory']) || is_numeric($settings['nameLogDirectory'])){
+                if(strpos($settings['nameLogDirectory'], '.json', -5)){
+                    
+                }
+            }
+
+
+        } else {
+
+        }
+    }
 }
 
 function formatData($options, $columns)
@@ -59,13 +143,15 @@ function formatData($options, $columns)
 
 function mergerObj($data, $option, $param)
 {
-    if(!is_array($data))
+    if (!is_array($data))
         $data = (array)$data;
 
     if (empty($option))
         return $data;
 
     $res = [];
+
+    //array_change_key_case приводит ключи к ниижнему регистру
 
     if (empty($option['prefix']))
         $option['prefix'] = '';
@@ -109,7 +195,7 @@ function createInsert($data, $option, $table, $columns, $param = false, $checkOp
 
     foreach ($data as $id => $item) {
         $tempData = mergerObj($item, $option, $param);
-        if($checkOption !== false)
+        if ($checkOption !== false)
             if (!in_array($tempData[$checkOption['name']], $checkOption['array']))
                 $checkOption['array'][] = $tempData[$checkOption['name']];
 
@@ -151,13 +237,13 @@ function getColumn($option, $table, $dbconnect)
 {
     if (empty($option['column'])) {
         return fillColumnTable($table, $dbconnect);
-    } elseif (!empty($option['column']['%notAll%'])){
-        if($option['column']['%notAll%']  === true){
+    } elseif (!empty($option['column']['%notAll%'])) {
+        if ($option['column']['%notAll%'] === true) {
             $columnsDB = fillColumnTable($table, $dbconnect);
             unset($option['column']['%notAll%']);
-            foreach ($option['column'] as $name=>$column){
-                if(in_array($name,$columnsDB) !== false){
-                    array_splice($columnsDB, array_search($name,$columnsDB), 1 );
+            foreach ($option['column'] as $name => $column) {
+                if (in_array($name, $columnsDB) !== false) {
+                    array_splice($columnsDB, array_search($name, $columnsDB), 1);
                 }
             }
             return array_merge($columnsDB, $option['column']);
@@ -198,7 +284,7 @@ function paramsGetRequest($param, $isArr = false)
             $getParams[1] = getParam($name, $value, $isArr);
             foreach ($getParams[0] as $item) {
                 foreach ($getParams[1] as $item1) {
-                    $getParams[2][] = $isArr?array_merge($item, $item1):$item . '&' . $item1;
+                    $getParams[2][] = $isArr ? array_merge($item, $item1) : $item . '&' . $item1;
                 }
             }
 
@@ -213,7 +299,7 @@ function paramsGetRequest($param, $isArr = false)
 function createOutputInfo($num, $count, $table, $step = 25)
 {
     $load = $table . ':  [';
-    if($count / $step < 1)
+    if ($count / $step < 1)
         $step = $count;
     $length = floor($num / floor($count / $step));
     for ($i = 0; $i < $step; $i++) {
@@ -234,11 +320,5 @@ function exceptionHandler($code, $msg, $file, $line)
     echo $msg . ' ' . $line . PHP_EOL;
 }
 
-set_error_handler('myExcHand');
 
-$logs = [];
-$time = date('d.m.y H:i:s');
-$nameLogDictionary = 'logs/' . date('dmy_Hi') . '__' . crc32(date("dmyHis")) . DIRECTORY_SEPARATOR;
-$nameLogFile = $nameLogDictionary . date('dmy__H-i') . '.json';
-mkdir($nameLogDictionary);
 
