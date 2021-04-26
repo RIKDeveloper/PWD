@@ -123,6 +123,12 @@ class ParseWriteData
      *
      * string 'password' пароль от учетной записи
      *
+     * + array|string 'options' путь к файлу опций для парсинга или сами опции
+     *
+     * Пример:
+     *
+     * [["links"=>"http://url.dot", 'login'=>['username'=>]]]
+     *
      * */
 
     public function __construct($settings = false)
@@ -183,10 +189,10 @@ class ParseWriteData
             $this->connect = false;
         }
 
-        if (is_array($settings['option'])) {
-            $this->options = $settings['option'];
-        } elseif (is_string($settings['option'])) {
-            $this->options = json_decode(file_get_contents($settings['option']), true);
+        if (is_array($settings['options'])) {
+            $this->options = $settings['options'];
+        } elseif (is_string($settings['options'])) {
+            $this->options = json_decode(file_get_contents($settings['options']), true);
         }
 
         if ($settings['exceptionHandler'] === true){
