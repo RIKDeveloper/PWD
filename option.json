@@ -2,17 +2,18 @@
   {
     "links": "url",
     "login": {
-      "username": "admin"
+      "username": "admin",
+      "password": "12345678"
     },
     "tables": "table"|["table_1", "table_2"],
-    "options": {
+    "controls": {
       "__default": {
         "main": "all",
         "second": {
           "__all": true,
           "__prefix": "%parent%_"
         },
-        "action": "success"
+      "action": "success"
       }
     }
   }

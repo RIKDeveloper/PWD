@@ -66,6 +66,8 @@ class ParseWriteData
     private $connect;
     private $options;
     public $data = [];
+    public $currentKey = false;
+    public $currentOption = false;
 
     /**
      * Функция конструктор для класс ParseWriteData (PWD).
@@ -127,8 +129,11 @@ class ParseWriteData
      *
      * Пример:
      *
-     * [["links"=>"http://url.dot", 'login'=>['username'=>]]]
+     * [["links"=>"http://url.dot", 'login'=>['username'=>'admin', 'password'=>'12345678'],
+     * "tables" => ["table_1", "table_2"],
+     * "controls" => ["__default" => ["main" => "all", "second" => ["__all" => true, "__prefix" => "%parent%_"]]]]]
      *
+     * + boolean 'exceptionHandler' использовать обработчик ошибок с записью в логи.
      * */
 
     public function __construct($settings = false)
@@ -204,7 +209,17 @@ class ParseWriteData
 
     }
 
+    public function next(){
+        $keys = array_keys($this->options);
+        if($this->currentKey !== false){
+            $this->currentKey = $keys[array_search($this->currentKey, $keys) + 1];
+        } else{
+            $this->currentKey = $keys[0];
+        }
+        $this->currentOption = $this->options[$this->currentKey];
 
+        return $this->currentOption;
+    }
 
     private function getData($url, $isJson, $login){
         if (!$login) {
