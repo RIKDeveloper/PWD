@@ -1,0 +1,19 @@
+[
+  {
+    "links": "url",
+    "login": {
+      "username": "admin"
+    },
+    "tables": "table"|["table_1", "table_2"],
+    "options": {
+      "__default": {
+        "main": "all",
+        "second": {
+          "__all": true,
+          "__prefix": "%parent%_"
+        },
+        "action": "success"
+      }
+    }
+  }
+]

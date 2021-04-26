@@ -63,41 +63,189 @@ class ParseWriteData
     private $logs = [];
     private $nameLogDirectory;
     private $nameLogFile;
+    private $connect;
+    private $options;
+    public $data = [];
 
-    //settings -> nameLogFile, option for connect om postgres,
+    /**
+     * Функция конструктор для класс ParseWriteData (PWD).
+     *
+     * @param array $settings Настройки объекта.
+     *
+     * Возможные параметры:
+     *
+     * + boolean 'logging' true если нужно записывать логи используя данный класс, false в ином случае.
+     *
+     * По умолчанию true.
+     *
+     * Пример использования
+     * ['logging' => true]
+     *
+     * + string 'nameLogDirectory'|'NLD' наименование директории, в которую буду записываться файлы с логами.
+     *
+     * По умолчанию наименование формируется так: 'logs/[год][месяц][день]_[часы][минуты]/'.
+     *
+     * Пример 'logs/210426_0953/'.
+     *
+     * Примеры использования данного параметра:
+     *
+     * ['logging' => true, 'nameLogDirectory' => 'logs']
+     *
+     * ['logging' => true, 'NLD' => 'logs']
+     *
+     * + string 'nameLogFile'|'NLF' наименование файла, в который будут записываться логи.
+     *
+     * По умолчанию наименование формируется так: '[день][месяц][год]_[часы][минуты]__[хэш]'.
+     *
+     * Пример '260421_1003__2579438632.json'
+     *
+     * Примеры использования данного параметра
+     *
+     * ['logging' => true, 'nameLogFile' => 'logs.json']
+     *
+     * ['logging' => true, 'nameLogFile' => 'logs']
+     *
+     * ['logging' => true, 'NLF' => 'logs']
+     *
+     * ['logging' => true, 'NLF' => 'logs.json']
+     *
+     * + string|array 'postgres' массив со значениями для формирования строки для подключения к базу данных или сама строка
+     *
+     * Параметры массива:
+     *
+     * string 'host' хост для подключения к базе данных
+     *
+     * string|numeric 'port' порт
+     *
+     * string 'dbname' наименование базы данных для подключения
+     *
+     * string 'user' имя учетной записи
+     *
+     * string 'password' пароль от учетной записи
+     *
+     * */
 
     public function __construct($settings = false)
     {
-        $keys = ['logging', 'nameLogDirectory', 'NLD', 'nameLogFile', 'NLF'];
-        $replaceEmptyValuesKeysTrue = ['logging'];
+        $keys = ['logging', 'nameLogDirectory', 'NLD', 'nameLogFile', 'NLF',
+            'postgres', 'option', 'exceptionHandler'];
+        $defaultValues = ['logging'=>true, 'option'=>'option.json', 'exceptionHandler' => true];
         foreach ($keys as $key) {
             if (empty($settings[$key])) {
-                $settings[$key] = in_array($key, $replaceEmptyValuesKeysTrue);
+                $settings[$key] = empty($defaultValues[$key])?false:$defaultValues[$key];
             }
         }
 
-        if ($settings['logging'] === true) {
+        if ($settings['logging'] == true) {
             $this->logs['time_start'] = date('d.m.y H:i:s');
 
-            if (is_string($settings['nameLogDirectory']) || is_numeric($settings['nameLogDirectory'])) {
-                $this->nameLogDirectory = $settings['nameLogDirectory'];
+            if (is_string($settings['nameLogDirectory']) || is_numeric($settings['nameLogDirectory']) ||
+                is_string($settings['NLD']) || is_numeric($settings['NLD'])) {
+                $this->nameLogDirectory = $settings['nameLogDirectory'] !== false ? $settings['nameLogDirectory'] : $settings['NLD'];
             } else {
-                $this->nameLogDirectory = 'logs/' . '__' . date('ymd_Hi') . DIRECTORY_SEPARATOR;
-            }
-
-            if (is_string($settings['nameLogFile']) || is_numeric($settings['nameLogFile'])){
-                $this->nameLogFile = $settings['nameLogFile'];
-                if(strpos($this->nameLogFile, '.json', -5) === false){
-                    $this->nameLogFile .= '.json';
-                }
-            } else{
-                $this->nameLogFile = date('dmy__H-i') . crc32(microtime(true)) . '.json';
+                $this->nameLogDirectory = 'logs/' . date('ymd_Hi') . '/';
             }
 
             mkdir($this->nameLogDirectory);
-        } else {
 
+            if (is_string($settings['nameLogFile']) || is_numeric($settings['nameLogFile']) ||
+                is_string($settings['NLF']) || is_numeric($settings['NLF'])) {
+                $this->nameLogFile = $settings['nameLogFile'] !== false ? $settings['nameLogFile'] : $settings['NLF'];
+                if (strpos($this->nameLogFile, '.json', -5) === false) {
+                    $this->nameLogFile .= '.json';
+                }
+            } else {
+                $this->nameLogFile = date('dmy_Hi') . '__' . crc32(microtime(true)) . '.json';
+            }
+
+            file_put_contents($this->nameLogDirectory . $this->nameLogFile, '');
+        } else {
+            $this->logs = false;
         }
+
+        if ($settings['postgres'] !== false) {
+            if (is_array($settings['postgres'])) {
+                $settings['postgres']['host'] = empty($settings['postgres']['host']) ? 'localhost' : $settings['postgres']['host'];
+
+                $settings['postgres']['port'] = empty($settings['postgres']['port']) ? 5432 : $settings['postgres']['port'];
+
+                $settings['postgres']['dbname'] = empty($settings['postgres']['dbname']) ? 'postgres' : $settings['postgres']['dbname'];
+
+                $settings['postgres']['user'] = empty($settings['postgres']['user']) ? null : $settings['postgres']['user'];
+
+                $settings['postgres']['password'] = empty($settings['postgres']['password']) ? null : $settings['postgres']['password'];
+
+                $this->connect = 'host=' . $settings['postgres']['host'] . ' port=' . $settings['postgres']['port'] . ' dbname=' . $settings['postgres']['dbname'] . ' user=' . $settings['postgres']['user'] . ' password=' . $settings['postgres']['password'];
+            } else {
+                $this->connect = $settings['postgres'];
+            }
+        } else {
+            $this->connect = false;
+        }
+
+        if (is_array($settings['option'])) {
+            $this->options = $settings['option'];
+        } elseif (is_string($settings['option'])) {
+            $this->options = json_decode(file_get_contents($settings['option']), true);
+        }
+
+        if ($settings['exceptionHandler'] === true){
+            set_error_handler('$this->exceptionHandler');
+        }
+    }
+
+    public function parseData($table, $options){
+
+    }
+
+
+
+    private function getData($url, $isJson, $login){
+        if (!$login) {
+            for ($i = 0; $i < 4; $i++) {
+                $data = file_get_contents($url);
+                if ($isJson) {
+                    $data = json_decode($data, true);
+                    if (is_array($data)) {
+                        $this->data = $data;
+                        return $data;
+                    }
+                }
+                $this->data = $data;
+                return $data;
+            }
+            throw new Exception('Не могу получить данные от сайта: ' . $url . PHP_EOL);
+        } else {
+            if (!empty($login['username']) && !empty($login['password'])) {
+                $ch = curl_init();
+                if (strtolower((substr($url, 0, 5)) == 'https')) { // если соединяемся с https
+                    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, 0);
+                    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 0);
+                }
+                curl_setopt($ch, CURLOPT_URL, $url);
+                curl_setopt($ch, CURLOPT_POST, 1);
+                curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+                curl_setopt($ch, CURLOPT_USERAGENT, "Mozilla/4.0 (Windows; U; Windows NT 5.0; En; rv:1.8.0.2) Gecko/20070306 Firefox/1.0.0.4");
+                curl_setopt($ch, CURLOPT_USERPWD, $login['username'] . ':' . $login['password']);
+                $result = curl_exec($ch);
+
+                curl_close($ch);
+
+                if ($isJson) {
+                    $result = json_decode($result, true);
+                    if (is_array($result)) {
+                        $this->data = $result;
+                        return $result;
+                    }
+                }
+                $this->data = $result;
+                return $result;
+            }
+        }
+    }
+
+    private function exceptionHandler($code, $msg, $file, $line){
+
     }
 }
 
@@ -319,6 +467,3 @@ function exceptionHandler($code, $msg, $file, $line)
     file_put_contents($nameLogFile, json_encode($logs, JSON_UNESCAPED_UNICODE));
     echo $msg . ' ' . $line . PHP_EOL;
 }
-
-
-
