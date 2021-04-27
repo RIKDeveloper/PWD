@@ -54,7 +54,7 @@ function getData($url, $isJson = true, $curlOption = false)
         }
         return $data;
     }
-    throw new Exception('Не могу получить данные от сайта: ' . $url . PHP_EOL);
+//    throw new Exception('Не могу получить данные от сайта: ' . $url . PHP_EOL);
 
 }
 
@@ -64,10 +64,11 @@ class ParseWriteData
     private $nameLogDirectory;
     private $nameLogFile;
     private $connect;
-    private $options;
+    public $options;
     public $data = [];
     public $currentKey = false;
     public $currentOption = false;
+    public $table = false;
 
     /**
      * Функция конструктор для класс ParseWriteData (PWD).
@@ -136,11 +137,11 @@ class ParseWriteData
      * + boolean 'exceptionHandler' использовать обработчик ошибок с записью в логи.
      * */
 
-    public function __construct($settings = false)
+    public function __construct($settings = [])
     {
         $keys = ['logging', 'nameLogDirectory', 'NLD', 'nameLogFile', 'NLF',
-            'postgres', 'option', 'exceptionHandler'];
-        $defaultValues = ['logging'=>true, 'option'=>'option.json', 'exceptionHandler' => true];
+            'postgres', 'options', 'exceptionHandler'];
+        $defaultValues = ['logging'=>true, 'options'=>'option.json'];
         foreach ($keys as $key) {
             if (empty($settings[$key])) {
                 $settings[$key] = empty($defaultValues[$key])?false:$defaultValues[$key];
@@ -205,18 +206,211 @@ class ParseWriteData
         }
     }
 
-    public function parseData($table, $options){
+    public function parseData(){
+        if ($this->currentOption === false)
+            if ($this->nextOrPrev() === false)
+                return false;
+
+        if ($this->table === false)
+            if($this->nextTable() === false)
+                return false;
+
+
+
+
+    }
+
+    public function mergerObj($data, $option, $param = false)
+    {
+        if (is_object($data))
+            $data = (array)$data;
+
+        if (empty($option))
+            return $data;
+
+        if (empty($option['prefix']))
+            $option['prefix'] = '';
+
+        $res = [];
+
+        $data = array_change_key_case($data);
+
+        if(!empty($option['main'])){
+            if(is_array($option['main'])){
+                foreach ($option['main'] as $item) {
+                    $res[$option['prefix'] . $item] = $data[$item];
+                }
+            } elseif ($option['main'] == "__all"){
+                foreach ($data as $id => $value) {
+                    if (!is_array($value) && !is_object($value))
+                        $res[strtolower($option['prefix'] . $id)] = $value;
+                }
+            } elseif (!empty($data[strtolower($option['main'])])){
+                $res[strtolower($option['main'])] = $data[strtolower($option['main'])];
+            }
+        }
+
+        if(!empty($option['second'])){
+            $option['second']['__all'] = empty($option['second']['__all'])?false:$option['second']['__all'];
+            if($option['second']['__all'] === true){
+                foreach ($data as $id => $value) {
+                    if (is_object($value) || is_array($value)) {
+                        $res = array_merge(
+                            $this->mergerObj((array)$value, [
+                                'main' => 'all',
+                                'prefix' => str_replace('%parent%', $id, $option['second']['__prefix'])
+                            ])
+                            , $res);
+                    }
+                }
+            } elseif (is_array($option['second'])){
+                foreach ($option['second'] as $id=>$item){
+                    if(strpos($id, '__') !== 0){
+                        if(is_array($data[$id]) || is_object($data[$id])){
+                            $item['prefix'] = empty($item['prefix'])?'':str_replace('%parent%', $id, $item['prefix']);
+
+                            $item['array'] = empty($item['array'])?false:$item['array'];
+
+                            $item['param'] = empty($item['param'])?false:$item['param'];
+
+                            if($item['array'] === true){
+                                $arr = [];
+
+                                foreach ($data[$id] as $datum){
+                                    if (is_array($item['param'])){
+                                        $temp = $this->mergerObj(
+                                            (array)$datum,
+                                            $item,
+                                            array_merge($param!==false?$param:[], $res, $item['param'])
+                                        );
+                                    } elseif($item['param'] === true) {
+                                        $temp = $this->mergerObj(
+                                            (array)$datum,
+                                            $item,
+                                            array_merge($param!==false?$param:[], $res));
+                                    } else{
+                                        $temp = $this->mergerObj((array)$datum, $item, $res);
+                                    }
+
+                                    if(is_array($temp)){
+                                        var_dump($temp);
+                                    }
+                                }
+
+
+                            }
+
+
+                        }
+                    }
+                }
+            }
+        }
+
+//        if  (!empty($option['second'])) {
+//            foreach ($option['second'] as $id => $item) {
+//                if (!empty($data[$id])) {
+//                    if (is_array($data[$id]) || is_object($data[$id])) {
+//                        if (!empty($item['array'])) {
+//                            $arr = [];
+//                            foreach ($data[$id] as $elem) {
+//                                if (!empty($option['param']) && $param !== false) {
+//                                    $temp = mergerObj((array)$elem, $item, ($option['param'] ? array_merge($param, $res) : $res));
+//                                } else {
+//                                    $temp = mergerObj((array)$elem, $item, $res);
+//                                }
+//                                if (!empty($temp)) {
+//                                    if (empty($temp[0])) {
+//                                        $arr[] = $temp;
+//                                    } else {
+//                                        $arr = array_merge($temp, $arr);
+//                                    }
+//                                }
+//                            }
+//                            $res = $arr;
+//                        } else {
+//                            $res = array_merge(mergerObj((array)$data[$id], $item), $res);
+//                        }
+//                    }
+//                }
+//            }
+//        }
+//
+//        if (!empty($option['second']) && !empty($option['second']['__all'])) {
+//            foreach ($data as $id => $value) {
+//                if (is_object($data[$id]) || is_array($data[$id])) {
+//                    $res = array_merge(mergerObj((array)$data[$id], ['main' => 'all', 'prefix' => str_replace('%parent%', $id, $option['second']['__prefix'])]), $res);
+//                }
+//            }
+//        } elseif (!empty($option['second'])) {
+//            foreach ($option['second'] as $id => $item) {
+//                if (is_array($data[$id]) || is_object($data[$id]))
+//                    $res = array_merge(mergerObj((array)$data[$id], $item), $res);
+//            }
+//        }
+//
+//        if ($param !== false) {
+//            return array_merge($res, $param);
+//        }
+
+        return $res;
+    }
+
+    public function nextTable(){
+        $tables = array_values($this->currentOption['tables']);
+
+        if(count($tables) < 1){
+            $this->table = false;
+            return false;
+        }
+
+        if($this->table !== false){
+            $this->table = $tables[array_search($this->table) + 1];
+        }
+        else{
+            $this->table = $tables[0];
+        }
+
+        return $this->table;
+    }
+
+    public function currentOption(){
+        if ($this->currentKey === false)
+            if($this->nextOrPrev() === false)
+                return false;
+        return [$this->currentKey=>$this->currentOption];
 
     }
 
     public function next(){
-        $keys = array_keys($this->options);
-        if($this->currentKey !== false){
-            $this->currentKey = $keys[array_search($this->currentKey, $keys) + 1];
-        } else{
-            $this->currentKey = $keys[0];
+        return $this->nextOrPrev();
+    }
+
+    public function prev(){
+        return $this->nextOrPrev(false);
+    }
+
+    private function nextOrPrev($next = true){
+        if (empty($this->options)){
+            return false;
         }
-        $this->currentOption = $this->options[$this->currentKey];
+        $keys = array_keys($this->options);
+        if($next){
+            $num = $this->currentKey !== false?array_search($this->currentKey, $keys)-1:0;
+        } else{
+            $num = $this->currentKey !== false?array_search($this->currentKey, $keys)+1:0;
+        }
+
+        if ($num < 0 || $num > count($keys))
+            $num = false;
+
+        $this->currentKey = $num!==false?$keys[$num]:false;
+
+        $this->currentOption = $this->currentKey !== false?$this->options[$this->currentKey]:false;
+
+        if (is_array($this->currentOption['tables']) && !empty($this->currentOption['tables'])){
+            $this->table = array_values($this->currentOption['tables'])[0];
+        }
 
         return $this->currentOption;
     }
@@ -310,51 +504,7 @@ function formatData($options, $columns)
     return $res;
 }
 
-function mergerObj($data, $option, $param)
-{
-    if (!is_array($data))
-        $data = (array)$data;
 
-    if (empty($option))
-        return $data;
-
-    $res = [];
-
-    //array_change_key_case приводит ключи к ниижнему регистру
-
-    if (empty($option['prefix']))
-        $option['prefix'] = '';
-
-    if (!empty($option['main']) && is_array($option['main'])) {
-        foreach ($option['main'] as $item) {
-            $res[$option['prefix'] . $item] = $data[$item];
-        }
-    } elseif (!empty($option['main'])) {
-        foreach ($data as $id => $value) {
-            if (!is_array($value) && !is_object($value))
-                $res[$option['prefix'] . $id] = $value;
-        }
-    }
-
-    if (!empty($option['second']) && !empty($option['second']['__all'])) {
-        foreach ($data as $id => $value) {
-            if (is_object($data[$id]) || is_array($data[$id])) {
-                $res = array_merge(mergerObj((array)$data[$id], ['main' => 'all', 'prefix' => str_replace('%parent%', $id, $option['second']['__prefix'])]), $res);
-            }
-        }
-    } elseif (!empty($option['second'])) {
-        foreach ($option['second'] as $id => $item) {
-            if (is_array($data[$id]) || is_object($data[$id]))
-                $res = array_merge(mergerObj((array)$data[$id], $item), $res);
-        }
-    }
-
-    if ($param !== false) {
-        return array_merge($res, $param);
-    }
-
-    return $res;
-}
 
 function createInsert($data, $option, $table, $columns, $param = false, $checkOption = false)
 {
