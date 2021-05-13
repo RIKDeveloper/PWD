@@ -135,12 +135,14 @@ class ParseWriteData
      * "controls" => ["__default" => ["main" => "all", "second" => ["__all" => true, "__prefix" => "%parent%_"]]]]]
      *
      * + boolean 'exceptionHandler' использовать обработчик ошибок с записью в логи.
+     *
+     * + boolean updateOptions требуется ли обновлять опции и перезаписывать файл опций если он есть.
      * */
 
     public function __construct($settings = [])
     {
         $settings = $this->modernArray(['logging', 'nameLogDirectory', 'NLD', 'nameLogFile', 'NLF',
-            'postgres', 'options', 'exceptionHandler'], ['logging' => true, 'options' => 'option.json'], $settings);
+            'postgres', 'options', 'exceptionHandler', 'updateOptions'], ['logging' => true, 'options' => 'option.json'], $settings);
 
         if ($settings['logging'] == true) {
             $this->logs['time_start'] = date('d.m.y H:i:s');
@@ -210,7 +212,7 @@ class ParseWriteData
             if ($this->nextTable() === false)
                 return false;
 
-
+        $this->modernData = $this->removeNesting();
     }
 
     private function modernArray($keys, $defaultValues, $array)
@@ -231,9 +233,6 @@ class ParseWriteData
 
         if (empty($option))
             return $data;
-
-        if (empty($option['prefix']))
-            $option['prefix'] = '';
 
         $option = $this->modernArray(['prefix', 'main', 'second', 'children'], ['prefix' => ''], $option);
 
@@ -271,21 +270,25 @@ class ParseWriteData
             foreach ($option['second'] as $id => $item) {
                 if (strpos($id, '__') !== 0) {
                     if(is_array($data[$id]) || is_object($data[$id])){
-                        $item['prefix'] = empty($item['prefix']) ? '' : str_replace('%parent%', $id, $item['prefix']);
-
-                        $item['array'] = empty($item['array']) ? false : $item['array'];
-
-                        $item['param'] = empty($item['param']) ? false : $item['param'];
-
-                        $item['parentOption'] = empty($item['parentOption']) ? false : $item['parentOption'];
+                        $item = $this->modernArray(['prefix', 'array', 'param', 'parentOption', 'name', 'joinMainArray'], ['prefix'=>''], $item);
 
                         if ($item['array'] === true) {
-                            $arr = [];
+                            $join = false;
+                            if(!empty($res['__join__'])){
+                                $join = $res['__join__'];
+                                unset($res['__join__']);
+                            }
+
+                            if ($this->is_dict($res) && !empty($res)) {
+                                $res = [$res];
+                            }
+
+                            if ($join !== false){
+                                $res['__join__'] = $join;
+                            }
 
                             foreach ($data[$id] as $datum) {
-                                if (empty($res[0])) {
-                                    $res = [$res];
-                                }
+
                                 if (is_array($item['param'])) {
                                     if($item['parentOption'] === true){
                                         $temp = $this->removeNesting(
@@ -298,16 +301,6 @@ class ParseWriteData
                                             array_merge($param !== false ? $param : [], $res, $item['param'])
                                         );
                                     }
-                                } elseif ($item['param'] === true) {
-                                    if($item['parentOption'] === true){
-                                        $temp = $this->removeNesting(
-                                            (array)$datum, $option, ($param !== false ? $param : false));
-                                    } else{
-                                        $temp = $this->removeNesting(
-                                            (array)$datum,
-                                            $item,
-                                            array_merge($param !== false ? $param : [], $res));
-                                    }
                                 } else {
                                     if($item['parentOption'] === true){
                                         $temp = $this->removeNesting((array)$datum, $option);
@@ -316,16 +309,63 @@ class ParseWriteData
                                     }
                                 }
 
-                                if (is_array($temp)) {
-                                    if (empty($temp[0])) {
-                                        $res[] = $temp;
-                                    } else {
-                                        $res = array_merge($temp, $res);
+                                if(is_array($temp)){
+                                    if(!empty($temp['__join__'])){
+                                        if(empty($res['__join__'])){
+                                            $res['__join__'] = [];
+                                        }
+                                        $res['__join__'] = array_merge($res['__join__'], $temp['__join__']);
+                                        unset($temp['__join__']);
+                                    }
+
+                                    if(is_string($item['name'])){
+
+                                        if($this->is_dict($temp)){
+                                            $res[$item['name']][] = $temp;
+                                        } else{
+                                            if(empty($res[$item['name']]))
+                                                $res[$item['name']] = [];
+                                            $res[$item['name']] = array_merge($temp, $res[$item['name']]);
+                                        }
+
+                                    } elseif ($item['joinMainArray'] === true){
+                                        if($this->is_dict($temp)){
+                                            $res['__join__'][] = $temp;
+                                        } else{
+                                            $res['__join__'] = array_merge($res['__join__'], $temp);
+                                        }
+                                    } else{
+                                        if($this->is_dict($temp)){
+                                            $res[] = $temp;
+                                        } else{
+                                            $res = array_merge( $res, $temp );
+                                        }
                                     }
                                 }
                             }
                         } else {
-                            $res = array_merge($this->removeNesting((array)$data[$id], $item), $res);
+                            if ($item['parentOption'] === true){
+                                $temp = $this->removeNesting((array)$data[$id], $option, is_array($option['param'])?$option['param']:false);
+                            } else{
+                                $temp = $this->removeNesting((array)$data[$id], $item, is_array($item['param'])?$item['param']:false);
+                            }
+
+
+
+                            if(!empty($temp['__join__'])){
+                                if(empty($res['__join__'])){
+                                    $res['__join__'] = [];
+                                }
+                                $res['__join__'] = array_merge($res['__join__'], $temp['__join__']);
+                                unset($temp['__join__']);
+                            }
+                            if($item['name'] !== false){
+                                $res[$item['name']] = array_merge($res[$item['name']], $temp);
+                            } elseif ($item['joinMainArray'] === true){
+                                $res['__join__'][] = $temp;
+                            } else{
+                                $res = array_merge($res, $temp);
+                            }
                         }
                     }
                 }
@@ -333,6 +373,10 @@ class ParseWriteData
         }
 
         return $res;
+    }
+
+    public function is_dict($arr){
+        return !is_numeric( implode( '', array_keys($arr) ) );
     }
 
     public function nextTable()
