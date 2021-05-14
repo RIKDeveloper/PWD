@@ -66,6 +66,7 @@ class ParseWriteData
     private $connect;
     public $options;
     public $data = [];
+    private $modernData = [];
     public $currentKey = false;
     public $currentOption = false;
     public $table = false;
@@ -212,14 +213,16 @@ class ParseWriteData
             if ($this->nextTable() === false)
                 return false;
 
-        $this->modernData = $this->removeNesting();
+        $this->modernData = $this->removeNesting($this->data, $this->currentOption);
+
+        return $this->modernData;
     }
 
     private function modernArray($keys, $defaultValues, $array)
     {
         foreach ($keys as $key) {
             if (empty($array[$key])) {
-                $array[$key] = empty($defaultValues[$key]) ? false : $defaultValues[$key];
+                $array[$key] = in_array($key, array_keys($defaultValues))?$defaultValues[$key]:false;
             }
         }
 
@@ -231,7 +234,7 @@ class ParseWriteData
         if (is_object($data))
             $data = (array)$data;
 
-        if (empty($option))
+        if (empty($option) || empty($data))
             return $data;
 
         $option = $this->modernArray(['prefix', 'main', 'second', 'children'], ['prefix' => ''], $option);
@@ -487,52 +490,97 @@ class ParseWriteData
         }
     }
 
+    public function formatData($data, $options, $columns){
+        $res = [];
+        $col = [];
+
+        if (empty($data) || empty($columns)){
+            return false;
+        }
+
+        $options = $this->modernArray(['__nums', '__notnull'], ['__nums'=>[], '__notnull'=>[]], $options);
+
+        foreach ($columns as $id => $name){
+            $col[] = is_numeric($id)?$name:$id;
+
+            if ($name === false) {
+                continue;
+            }
+
+            if (in_array($name, array_keys($data))){
+                if(empty($data[$name]))
+                    var_dump($data);
+                if(in_array($name, $options['__nums']) || in_array($id, $options['__nums'])){
+                    if(is_string($data[$name])){
+                        $data[$name] = str_replace(' ', '', $data[$name]);
+                        $data[$name] = str_replace(',', '.', $data[$name]);
+                    }
+
+                    $res[] = is_numeric($data[$name])?$data[$name]:'null';
+                } else{
+                    $res[] = "'" . trim(str_replace("'", '"', $data[$name])) . "'";
+                }
+            } else{
+                $res[] = 'null';
+            }
+
+            if((in_array($name, $options['__notnull']) || in_array($id, $options['__notnull']))
+                && $res[count($res) - 1] === 'null'){
+                return false;
+            }
+        }
+
+        return ['columns'=>$col, 'values'=>$res];
+    }
+
+    public function createInsert($data, $col, $table){
+        if(empty($data) || empty($col) || empty($table)){
+            return false;
+        }
+
+        $insert = 'INSERT INTO ' . $table . '(' . implode(', ', $col) . ') VALUES ';
+
+        if (!$this->is_dict($data)){
+            $values = [];
+            foreach ($data as $item){
+                $values[] = '(' . implode(', ', $item) . ')';
+            }
+
+            $insert .= implode(', ', $values);
+        } else{
+            $insert .= '(' . implode(', ', $data) . ')';
+        }
+
+        return $insert;
+    }
+
+    public function checkValidData(){
+
+    }
+
+    public function mergeArray($array){
+        if (empty($array['__join__'])){
+            return $array;
+        }
+
+        foreach ($array['__join__'] as $join){
+            foreach ($array as $i=>$item){
+                $array[$i] = array_merge($item, $join);
+            }
+        }
+
+        unset($array['__join__']);
+
+        return $array;
+    }
+
     private function exceptionHandler($code, $msg, $file, $line)
     {
 
     }
+
+
 }
-
-function formatData($options, $columns)
-{
-    $res = [
-        'columns' => '',
-        'values' => ''
-    ];
-
-    if (empty($options['__nums']))
-        $options['__nums'] = [];
-
-    foreach ($columns as $id => $name) {
-        if (strlen($res['values']) != 0) {
-            $res['values'] .= ', ';
-            $res['columns'] .= ', ';
-        }
-
-        if (is_numeric($id)) {
-            $res['columns'] .= $name;
-        } else {
-            $res['columns'] .= $id;
-        }
-
-        if (!empty($options[$name]) || !empty($options['__get'])) {
-            if (!is_array($options[$name])) {
-                if (in_array($name, $options['__nums'])) {
-                    $res['values'] .= $options[$name];
-                } else {
-                    $res['values'] .= "'" . trim(str_replace("'", '"', $options[$name])) . "'";
-                }
-            } else {
-                $res['values'] .= 'null';
-            }
-        } else {
-            $res['values'] .= 'null';
-        }
-    }
-
-    return $res;
-}
-
 
 function createInsert($data, $option, $table, $columns, $param = false, $checkOption = false)
 {
