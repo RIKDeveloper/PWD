@@ -1,69 +1,11 @@
 <?php
-/**
- * Получение данных от сервера по заданному url.
- *
- *
- *
- *
- * @param string $url url адрес с get параметрами (если нужно)
- * Пример передаваемого url:
- * 'http://ya.ru '
- * @param boolean $isJson нужно ли парсить данные как джейсон формат
- * @param boolean|array $curlOption параметры (username, password) для авторизации на сайте используя cURL (false если нет надабности использовать)
- * Пример передаваемых параметров:
- * ['username'=> 'admin', 'password'=>'12345678']
- * @return array декодированные данные
- */
-function getData($url, $isJson = true, $curlOption = false)
-{
-    for ($i = 0; $i < 4; $i++) {
-        if (!$curlOption) {
-            $data = file_get_contents($url);
-        } else {
-            if (!empty($curlOption['username']) && !empty($curlOption['password'])) {
-                $ch = curl_init();
-                if (strtolower((substr($url, 0, 5)) == 'https')) { // если соединяемся с https
-                    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, 0);
-                    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 0);
-                }
-                curl_setopt($ch, CURLOPT_URL, $url);
-                curl_setopt($ch, CURLOPT_POST, 1);
-                curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-                curl_setopt($ch, CURLOPT_USERAGENT, "Mozilla/4.0 (Windows; U; Windows NT 5.0; En; rv:1.8.0.2) Gecko/20070306 Firefox/1.0.0.4");
-                curl_setopt($ch, CURLOPT_USERPWD, $curlOption['username'] . ':' . $curlOption['password']);
-                $result = curl_exec($ch);
-
-                curl_close($ch);
-
-                if ($isJson) {
-                    $result = json_decode($result, true);
-                    if (is_array($result)) {
-                        return $result;
-                    }
-                }
-
-                return $result;
-            }
-        }
-
-        if ($isJson) {
-            $data = json_decode($data, true);
-            if (is_array($data)) {
-                return $data;
-            }
-        }
-        return $data;
-    }
-//    throw new Exception('Не могу получить данные от сайта: ' . $url . PHP_EOL);
-
-}
 
 class ParseWriteData
 {
     public $logs = [];
     public $nameLogDirectory;
     public $nameLogFile;
-    public $connect;
+    public $connect = false;
     public $options;
     public $data = [];
     private $modernData = [];
@@ -138,8 +80,6 @@ class ParseWriteData
      * "tables" => ["table_1", "table_2"],
      * "controls" => ["__default" => ["main" => "all", "second" => ["__all" => true, "__prefix" => "%parent%_"]]]]]
      *
-     * + boolean 'exceptionHandler' использовать обработчик ошибок с записью в логи.
-     *
      * + boolean updateOptions требуется ли обновлять опции и перезаписывать файл опций если он есть.
      * */
 
@@ -199,14 +139,6 @@ class ParseWriteData
             $this->options = $settings['options'];
         } elseif (is_string($settings['options'])) {
             $this->options = json_decode(file_get_contents($settings['options']), true);
-        }
-
-        if ($settings['exceptionHandler'] === true) {
-//            set_error_handler('exceptionHandler');
-            set_error_handler(function ($code, $msg, $file, $line){
-                $this->exceptionList[] = [$msg . ' in ' . $file . ' on line ' . $line . PHP_EOL, date('h:i:s'), $this->insert !== false?$this->insert:null];
-                echo $msg . ' in ' . $file . ' on line ' . $line . PHP_EOL;
-            });
         }
 
         $this->nameExceptionListFile = date('dmy_Hi') . '__warning__' . crc32(microtime(true)) . '.json';
@@ -292,22 +224,24 @@ class ParseWriteData
         return $this->modernData;
     }
 
-    public function clearInsertExcHandler(){
+    public function clearInsertExcHandler()
+    {
         $this->insert = false;
     }
 
     //
     ////
 
-    public function is_dict($arr){
-        return !is_numeric( implode( '', array_keys($arr) ) );
+    public function is_dict($arr)
+    {
+        return !is_numeric(implode('', array_keys($arr)));
     }
 
-    private function modernArray($keys, $defaultValues, $array)
+    public function modernArray($keys, $defaultValues, $array)
     {
         foreach ($keys as $key) {
-            if (empty($array[$key])) {
-                $array[$key] = in_array($key, array_keys($defaultValues))?$defaultValues[$key]:false;
+            if (!array_key_exists($key ,$array)) {
+                $array[$key] = in_array($key, array_keys($defaultValues)) ? $defaultValues[$key] : false;
             }
         }
 
@@ -321,7 +255,7 @@ class ParseWriteData
             echo $info . PHP_EOL;
             echo $newLoader;
             return $newLoader;
-        } else{
+        } else {
             return $oldLoader;
         }
     }
@@ -330,7 +264,7 @@ class ParseWriteData
     {
         $load = $text . ': [';
 
-        if($num >= $count  || $count == 0){
+        if ($num >= $count || $count == 0) {
             return $load . '#########################] ' . $afterText . PHP_EOL;
         }
 
@@ -348,7 +282,8 @@ class ParseWriteData
         return $load . $afterText . PHP_EOL;
     }
 
-    public function writeLogs($pathLogsFile, $logs){
+    public function writeLogs($pathLogsFile, $logs)
+    {
         file_put_contents($pathLogsFile, json_encode($logs, JSON_UNESCAPED_UNICODE));
     }
 
@@ -388,7 +323,7 @@ class ParseWriteData
                 if (is_object($value) || is_array($value)) {
                     $res = array_merge(
                         $this->removeNesting((array)$value, [
-                            'main' => 'all',
+                            'main' => '__all',
                             'prefix' => str_replace('%parent%', $id, $option['second']['__prefix'])
                         ])
                         , $res);
@@ -397,13 +332,13 @@ class ParseWriteData
         } elseif (is_array($option['second'])) {
             foreach ($option['second'] as $id => $item) {
                 if (strpos($id, '__') !== 0 && !empty($data[$id])) {
-                    $item = $this->modernArray(['prefix', 'array', 'param', 'parentOption', 'name', 'joinMainArray'], ['prefix'=>''], $item);
+                    $item = $this->modernArray(['prefix', 'array', 'param', 'parentOption', 'name', 'joinMainArray'], ['prefix' => ''], $item);
 
                     $item['prefix'] = str_replace('%parent%', $id, $item['prefix']);
-                    if(is_array($data[$id]) || is_object($data[$id])){
+                    if (is_array($data[$id]) || is_object($data[$id])) {
                         if ($item['array'] === true) {
                             $join = false;
-                            if(!empty($res['__join__'])){
+                            if (!empty($res['__join__'])) {
                                 $join = $res['__join__'];
                                 unset($res['__join__']);
                             }
@@ -412,82 +347,82 @@ class ParseWriteData
                                 $res = [$res];
                             }
 
-                            if ($join !== false){
+                            if ($join !== false) {
                                 $res['__join__'] = $join;
                             }
 
                             foreach ($data[$id] as $datum) {
 
                                 if (is_array($item['param'])) {
-                                    if($item['parentOption'] === true){
+                                    if ($item['parentOption'] === true) {
                                         $temp = $this->removeNesting(
                                             (array)$datum, $option);
-                                    } else{
+                                    } else {
                                         $temp = $this->removeNesting(
                                             (array)$datum,
                                             $item);
                                     }
                                 } else {
-                                    if($item['parentOption'] === true){
+                                    if ($item['parentOption'] === true) {
                                         $temp = $this->removeNesting((array)$datum, $option);
-                                    } else{
+                                    } else {
                                         $temp = $this->removeNesting((array)$datum, $item);
                                     }
                                 }
 
-                                if(is_array($temp)){
-                                    if(!empty($temp['__join__'])){
-                                        if(empty($res['__join__'])){
+                                if (is_array($temp)) {
+                                    if (!empty($temp['__join__'])) {
+                                        if (empty($res['__join__'])) {
                                             $res['__join__'] = [];
                                         }
                                         $res['__join__'] = array_merge($res['__join__'], $temp['__join__']);
                                         unset($temp['__join__']);
                                     }
 
-                                    if(is_string($item['name'])){
+                                    if (is_string($item['name'])) {
 
-                                        if($this->is_dict($temp)){
+                                        if ($this->is_dict($temp)) {
                                             $res[$item['name']][] = $temp;
-                                        } else{
-                                            if(empty($res[$item['name']]))
+                                        } else {
+                                            if (empty($res[$item['name']]))
                                                 $res[$item['name']] = [];
                                             $res[$item['name']] = array_merge($temp, $res[$item['name']]);
                                         }
 
-                                    } elseif ($item['joinMainArray'] === true){
-                                        if($this->is_dict($temp)){
+                                    } elseif ($item['joinMainArray'] === true) {
+                                        if ($this->is_dict($temp)) {
                                             $res['__join__'][] = $temp;
-                                        } else{
+                                        } else {
                                             $res['__join__'] = array_merge($res['__join__'], $temp);
                                         }
-                                    } else{
-                                        if($this->is_dict($temp)){
+                                    } else {
+                                        if ($this->is_dict($temp)) {
                                             $res[] = $temp;
-                                        } else{
-                                            $res = array_merge( $res, $temp );
+                                        } else {
+                                            $res = array_merge($res, $temp);
                                         }
                                     }
                                 }
                             }
                         } else {
-                            if ($item['parentOption'] === true){
+                            if ($item['parentOption'] === true) {
                                 $temp = $this->removeNesting((array)$data[$id], $option);
-                            } else{
+                            } else {
                                 $temp = $this->removeNesting((array)$data[$id], $item);
                             }
 
-                            if(!empty($temp['__join__'])){
-                                if(empty($res['__join__'])){
+                            if (!empty($temp['__join__'])) {
+                                if (empty($res['__join__'])) {
                                     $res['__join__'] = [];
                                 }
                                 $res['__join__'] = array_merge($res['__join__'], $temp['__join__']);
                                 unset($temp['__join__']);
                             }
-                            if($item['name'] !== false){
+                            if ($item['name'] !== false) {
                                 $res[$item['name']] = array_merge($res[$item['name']], $temp);
-                            } elseif ($item['joinMainArray'] === true){
+                            } elseif ($item['joinMainArray'] === true) {
                                 $res['__join__'][] = $temp;
-                            } else{
+                            } else {
                                 $res = array_merge($res, $temp);
                             }
                         }
@@ -496,11 +431,11 @@ class ParseWriteData
             }
         }
 
-        if($option['param'] !== false && is_array($option['param'])){
-            if($this->is_dict($res)){
+        if ($option['param'] !== false && is_array($option['param'])) {
+            if ($this->is_dict($res)) {
                 $res = array_merge($res, $option['param']);
-            } else{
-                foreach ($res as $id=>$item){
+            } else {
+                foreach ($res as $id => $item) {
                     $res[$id] = array_merge($item, $option['param']);
                 }
             }
@@ -509,7 +444,177 @@ class ParseWriteData
         return $res;
     }
 
-    public function getData($url, $isJson, $login)
+    public function removeExcessBeta($data, $option, $param = false)
+    {
+        if (is_object($data))
+            $data = (array)$data;
+
+        if (empty($option) || empty($data))
+            return $data;
+
+        $option = $this->modernArray(['prefix', 'main', 'second', 'children', 'param'], ['prefix' => ''], $option);
+
+        $res = $main = $second = [];
+
+        $data = array_change_key_case($data);
+
+        if (is_array($option['main'])) {
+            foreach ($option['main'] as $item) {
+                $main[$option['prefix'] . $item] = $data[$item];
+            }
+        } elseif ($option['main'] == "__all") {
+            foreach ($data as $id => $value) {
+                if (!is_array($value) && !is_object($value))
+                    $main[strtolower($option['prefix'] . $id)] = $value;
+            }
+        } elseif (!empty($data[strtolower($option['main'])])) {
+            $main[strtolower($option['main'])] = $data[strtolower($option['main'])];
+        }
+
+        $option['second']['__all'] = empty($option['second']['__all']) ? false : $option['second']['__all'];
+
+        if ($option['second']['__all'] === true) {
+            foreach ($data as $id => $value) {
+                if (is_object($value) || is_array($value)) {
+                    $second = array_merge(
+                        $this->removeExcessBeta((array)$value, [
+                            'main' => '__all',
+                            'prefix' => str_replace('%parent%', $id, $option['second']['__prefix'])
+                        ])
+                        , $second);
+                }
+            }
+        } elseif (is_array($option['second'])) {
+            foreach ($option['second'] as $id => $item) {
+                if (strpos($id, '__') !== 0 && !empty($data[$id])) {
+                    $item = $this->modernArray(['prefix', 'array', 'param', 'parentOption', 'name', 'joinMainArray'], ['prefix' => ''], $item);
+
+                    $item['prefix'] = str_replace('%parent%', $id, $item['prefix']);
+                    if (is_array($data[$id]) || is_object($data[$id])) {
+                        if ($item['array'] === true) {
+                            if(empty($second['__array__'])){
+                                $second['__array__'] = [];
+                            }
+                            $numArr = count($second['__array__']);
+                            $second['__array__'][$numArr] = [];
+                            foreach ($data[$id] as $datum) {
+                                if (is_array($item['param'])) {
+                                    if ($item['parentOption'] === true) {
+                                        $temp = $this->removeExcessBeta(
+                                            (array)$datum, $option);
+                                    } else {
+                                        $temp = $this->removeExcessBeta(
+                                            (array)$datum,
+                                            $item);
+                                    }
+                                } else {
+                                    if ($item['parentOption'] === true) {
+                                        $temp = $this->removeExcessBeta((array)$datum, $option);
+                                    } else {
+                                        $temp = $this->removeExcessBeta((array)$datum, $item);
+                                    }
+                                }
+
+                                if (is_array($temp)) {
+                                    if (!empty($temp['__join__'])) {
+                                        if (empty($res['__join__'])) {
+                                            $res['__join__'] = [];
+                                        }
+                                        $res['__join__'] = array_merge($res['__join__'], $temp['__join__']);
+                                        unset($temp['__join__']);
+                                    }
+
+                                    if ($item['joinMainArray'] === true) {
+                                        if ($this->is_dict($temp)) {
+                                            $res['__join__'][] = $temp;
+                                        } else {
+                                            $res['__join__'] = array_merge($res['__join__'], $temp);
+                                        }
+                                    } else {
+                                        if ($this->is_dict($temp)) {
+                                            $second['__array__'][$numArr][] = $temp;
+                                        } else {
+                                            $second['__array__'][$numArr] = array_merge($second['__array__'][$numArr], $temp);
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            if ($item['parentOption'] === true) {
+                                $temp = $this->removeExcessBeta((array)$data[$id], $option);
+                            } else {
+                                $temp = $this->removeExcessBeta((array)$data[$id], $item);
+                            }
+
+                            if (!empty($temp['__join__'])) {
+                                if (empty($res['__join__'])) {
+                                    $res['__join__'] = [];
+                                }
+                                $res['__join__'] = array_merge($res['__join__'], $temp['__join__']);
+                                unset($temp['__join__']);
+                            }
+                            if ($item['joinMainArray'] === true) {
+                                $second['__join__'] = array_merge($second['__join__'], $temp);
+                            } else {
+                                $second = array_merge($second, $temp);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        $res = array_merge($main, $second);
+
+        if ($option['param'] !== false && is_array($option['param'])) {
+            if ($this->is_dict($res)) {
+                $res = array_merge($res, $option['param']);
+            } else {
+                foreach ($res as $id => $item) {
+                    $res[$id] = array_merge($item, $option['param']);
+                }
+            }
+        }
+
+        if(!empty($res[0]) && !empty($res[1])){
+            var_dump($res);
+            die();
+        }
+
+        return $res;
+    }
+
+    public function removeNestingBeta($data){
+        $res = [];
+        if($this->is_dict($data)){
+            if (empty($data['__array__'])){
+                return $data;
+            }
+
+            $main = $data;
+            unset($main['__array__']);
+
+            foreach ($data['__array__'] as $array){
+                foreach ($array as $item){
+                    $item = array_merge($main, $item);
+                    $temp = $this->removeNestingBeta($item);
+                    if ($this->is_dict($temp)){
+                        $res[] = $temp;
+                    } else{
+                        $res = array_merge($res, $temp);
+                    }
+                }
+            }
+        } else{
+            foreach ($data as $datum){
+                $res = array_merge($res, $this->removeNestingBeta($datum));
+            }
+        }
+
+        return $res;
+    }
+
+    public function getData($url, $isJson = true, $login = false)
     {
         if (!$login) {
             for ($i = 0; $i < 4; $i++) {
@@ -551,83 +656,260 @@ class ParseWriteData
                 $this->data = $result;
                 return $result;
             }
+            if(!empty($login['auth'])){
+                $ch = curl_init($url);
+
+                curl_setopt($ch, CURLOPT_HTTPHEADER, array('Content-Type: application/json' , $login['auth']));
+                curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "GET");
+                curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+                $result = curl_exec($ch);
+                curl_close($ch);
+
+                if ($isJson) {
+                    $result = json_decode($result, true);
+                    if (is_array($result)) {
+                        $this->data = $result;
+                        return $result;
+                    }
+                }
+
+                $this->data = $result;
+                return $result;
+            }
         }
     }
 
-    public function formatData($data, $options, $columns){
+    public function formatData($data, $options, $columns)
+    {
         $res = [];
         $col = [];
 
-        if (empty($data) || empty($columns)){
+        if (empty($data) || empty($columns)) {
             return false;
         }
 
-        $options = $this->modernArray(['__nums', '__notnull'], ['__nums'=>[], '__notnull'=>[]], $options);
+        $options = $this->modernArray(['__nums', '__notnull', 'dquotes'], ['__nums' => [], '__notnull' => []], $options);
 
-        foreach ($columns as $id => $name){
+        foreach ($columns as $id => $name) {
             if ($name === false) {
                 continue;
             }
 
-            $col[] = is_numeric($id)?$name:$id;
+            $col[] = is_numeric($id) ? $name : $id;
 
-            if (in_array($name, array_keys($data))){
-                if(in_array($name, $options['__nums']) || (!is_numeric($id) && in_array($id, $options['__nums']))){
-                    if(is_string($data[$name])){
+            if (in_array($name, array_keys($data))) {
+                if (in_array($name, $options['__nums']) || (!is_numeric($id) && in_array($id, $options['__nums']))) {
+                    if (is_string($data[$name])) {
                         $data[$name] = str_replace(' ', '', $data[$name]);
                         $data[$name] = str_replace(',', '.', $data[$name]);
                     }
 
-                    $res[] = is_numeric($data[$name])?$data[$name]:'null';
-                } else{
+                    $res[] = is_numeric($data[$name]) ? $data[$name] : 'null';
+                } else {
                     $res[] = "'" . trim(str_replace("'", '"', $data[$name])) . "'";
-                    if($res[count($res) - 1] === "''"){
+                    if($options['dquotes'] === true){
+                        $res[count($res) - 1] = str_replace("'", "\"", $res[count($res) - 1]);
+                        if($res[count($res) - 1] === "\"\""){
+                            $res[count($res) - 1] = "";
+                        }
+                    }
+                    if ($res[count($res) - 1] === "''") {
                         $res[count($res) - 1] = 'null';
                     }
                 }
-            } else{
+            } else {
                 $res[] = 'null';
             }
 
-            if((in_array($name, $options['__notnull']) || (!is_numeric($id) && in_array($id, $options['__notnull'])))
-                && $res[count($res) - 1] === 'null'){
+            if ((in_array($name, $options['__notnull']) || (!is_numeric($id) && in_array($id, $options['__notnull'])))
+                && $res[count($res) - 1] === 'null') {
                 return false;
             }
         }
 
-        return ['columns'=>$col, 'values'=>$res];
+        return ['columns' => $col, 'values' => $res];
     }
 
-    public function createInsert($data, $col, $table){
-        if(empty($data) || empty($col) || empty($table)){
+    public function createInsert($data, $col, $table)
+    {
+        if (empty($data) || empty($col) || empty($table)) {
             return false;
         }
 
         $insert = 'INSERT INTO ' . $table . '(' . implode(', ', $col) . ') VALUES ';
 
-        if (!$this->is_dict($data)){
+        if (!$this->is_dict($data)) {
             $values = [];
-            foreach ($data as $item){
+            foreach ($data as $item) {
                 $values[] = '(' . implode(', ', $item) . ')';
             }
 
             $insert .= implode(', ', $values);
-        } else{
+        } else {
             $insert .= '(' . implode(', ', $data) . ')';
         }
 
         return $insert;
     }
 
-    public function checkValidData(){
+    private function filter($array, $column, &$values, $have = true)
+    {
+        foreach ($values as $name => $value) {
+            if (!is_array($value)) {
+                $value = [$value];
+            }
+
+            $fieldArrays = array_column($array, array_search($name, $column));
+
+            $res = [];
+            foreach ($fieldArrays as $index => $item) {
+                $value = $values[$name];
+                if (strpos($item, "'") === 0) {
+                    $item = substr($item, 1, strlen($item) - 2);
+                }
+                if ($have) {
+                    if (in_array($item, $value)) {
+                        $res[] = $array[$index];
+                    }
+                } else {
+                    if (!empty($value)){
+                        if (!in_array($item, $value)) {
+                            $res[] = $array[$index];
+                            $values[$name][] = $item;
+                        }
+                    }
+                    else{
+                        $res[] = $array[$index];
+                        $values[$name][] = $item;
+                    }
+                }
+
+            }
+
+            $array = $res;
+        }
+
+        return $array;
+    }
+
+    public function filterData($array, $column, $have = false, &$haveNot = false)
+    {
+
+        if ($have === false && $haveNot === false)
+            return false;
+
+        if ($have !== false && is_array($have)) {
+            $array = $this->filter($array, $column, $have);
+        }
+
+        if ($haveNot !== false && is_array($haveNot)) {
+            $array = $this->filter($array, $column, $haveNot, false);
+        }
+
+        return count($array) > 0 ? $array : false;
+    }
+
+    public function paramsGetRequest($param, $isArr = false)
+    {
+        //переделать
+        function getParam($name, $values, $isArr = false)
+        {
+            $res = [];
+            if (is_array($values)) {
+                foreach ($values as $value) {
+                    $res[] = $isArr ? [$name => $value] : ($name . '=' . $value);
+                }
+            } else {
+                $posReturn = strrpos($values, '%return');
+                if ($posReturn !== false) {
+                    $value = substr($values, 0, $posReturn) .
+                        eval(substr($values, $posReturn + 1, strrpos($values, '%', $posReturn + 1) - $posReturn - 1)) .
+                        substr($values, strrpos($values, '%', $posReturn + 1) + 1);
+                    return $isArr ? array([$name => $value]) : [$name . '=' . $value];
+                }
+                return $isArr ? array([$name => $values]) : [$name . '=' . $values];
+            }
+            return $res;
+        }
+
+        $getParams = [];
+
+        foreach ($param as $name => $value) {
+            if ($getParams == []) {
+                $getParams[0] = getParam($name, $value, $isArr);
+            } else {
+                $getParams[1] = getParam($name, $value, $isArr);
+                foreach ($getParams[0] as $item) {
+                    foreach ($getParams[1] as $item1) {
+                        $getParams[2][] = $isArr ? array_merge($item, $item1) : $item . '&' . $item1;
+                    }
+                }
+
+                array_shift($getParams);
+                array_shift($getParams);
+            }
+        }
+
+        return $getParams[0];
 
     }
 
-    public function mergeColumns($optionColumns, $columns){
+    public function paramsGetRequestBeta($param, $isArr = false)
+    {
+        //переделать
+        function getParam($name, $values, $isArr = false)
+        {
+            $res = [];
+            if (is_array($values)) {
+                foreach ($values as $value) {
+                    $res[] = $isArr ? [$name => $value] : ($name . '=' . $value);
+                }
+            } else {
+                $posReturn = strrpos($values, '%return');
+                if ($posReturn !== false) {
+                    $value = substr($values, 0, $posReturn) .
+                        eval(substr($values, $posReturn + 1, strrpos($values, '%', $posReturn + 1) - $posReturn - 1)) .
+                        substr($values, strrpos($values, '%', $posReturn + 1) + 1);
+                    return $isArr ? array([$name => $value]) : [$name . '=' . $value];
+                }
+                return $isArr ? array([$name => $values]) : [$name . '=' . $values];
+            }
+            return $res;
+        }
+
+        $getParams = [];
+
+        foreach ($param as $name => $value) {
+            if ($getParams == []) {
+                if($name == "__main"){
+                    $getParams[0] = $value;
+                } else{
+                    $getParams[0] = getParam($name, $value, $isArr);
+                }
+
+            } else {
+                $getParams[1] = getParam($name, $value, $isArr);
+                foreach ($getParams[0] as $item) {
+                    foreach ($getParams[1] as $item1) {
+                        $getParams[2][] = $isArr ? array_merge($item, $item1) : $item . '&' . $item1;
+                    }
+                }
+
+                array_shift($getParams);
+                array_shift($getParams);
+            }
+        }
+
+        return $getParams[0];
+
+    }
+
+    public function mergeColumns($optionColumns, $columns)
+    {
         if (empty($optionColumns) || empty($columns))
             return false;
 
-        foreach ($optionColumns as $name=>$column){
+        foreach ($optionColumns as $name => $column) {
             if (in_array($name, $columns) !== false) {
                 array_splice($columns, array_search($name, $columns), 1);
             }
@@ -636,13 +918,14 @@ class ParseWriteData
         return array_merge($columns, $optionColumns);
     }
 
-    public function mergeArray($array){
-        if (empty($array['__join__'])){
+    public function mergeArray($array)
+    {
+        if (empty($array['__join__'])) {
             return $array;
         }
 
-        foreach ($array['__join__'] as $join){
-            foreach ($array as $i=>$item){
+        foreach ($array['__join__'] as $join) {
+            foreach ($array as $i => $item) {
                 $array[$i] = array_merge($item, $join);
             }
         }
@@ -652,64 +935,33 @@ class ParseWriteData
         return $array;
     }
 
-    public function getColumns($connect, $tableName){
+    public function getColumns($connect, $tableName)
+    {
         return array_column(pg_fetch_all(pg_query($connect, "select column_name,data_type from information_schema.columns where table_name = '" . $tableName . "'")), 'column_name');
     }
 
     public function exceptionHandler($code, $msg, $file, $line)
     {
-        $this->exceptionList[] = [$msg . ' in ' . $file . ' on line ' . $line . PHP_EOL, date('h:i:s'), $this->insert !== false?$this->insert:null];
+        $this->exceptionList[] = [$msg . ' in ' . $file . ' on line ' . $line . PHP_EOL, date('h:i:s'), $this->insert !== false ? $this->insert : null];
         echo $msg . ' in ' . $file . ' on line ' . $line . PHP_EOL;
     }
-}
 
-function exceptionHandler($code, $msg, $file, $line)
-{
-    $this->exceptionList[] = [$msg . ' in ' . $file . ' on line ' . $line . PHP_EOL, date('h:i:s'), $this->insert !== false?$this->insert:null];
-    echo $msg . ' in ' . $file . ' on line ' . $line . PHP_EOL;
-}
-
-//
-
-function getParam($name, $values, $isArr = false)
-{
-    $res = [];
-    if (is_array($values)) {
-        foreach ($values as $value) {
-            $res[] = $isArr ? [$name => $value] : ($name . '=' . $value);
+    public function checkDataDB($colNames, $tableName, $connect = false)
+    {
+        if (empty($colNames) || ($connect === false && $this->connect === false)) {
+            return false;
         }
-    } else {
-        $posReturn = strrpos($values, '%return');
-        if ($posReturn !== false) {
-            $value = substr($values, 0, $posReturn) .
-                eval(substr($values, $posReturn + 1, strrpos($values, '%', $posReturn + 1) - $posReturn - 1)) .
-                substr($values, strrpos($values, '%', $posReturn + 1) + 1);
-            return $isArr ? array([$name => $value]) : [$name . '=' . $value];
+
+        if ($connect === false)
+            $connect = $this->connect;
+
+        $values = [];
+
+        foreach ($colNames as $colName) {
+            $res = pg_fetch_all(pg_query($connect, "SELECT " . $colName . " FROM " . $tableName . " group by " . $colName));
+            $values[$colName] = array_column(($res === false?[]:$res), $colName);
         }
-        return $isArr ? array([$name => $values]) : [$name . '=' . $values];
+
+        return $values;
     }
-    return $res;
-}
-
-function paramsGetRequest($param, $isArr = false)
-{
-    $getParams = [];
-
-    foreach ($param as $name => $value) {
-        if ($getParams == []) {
-            $getParams[0] = getParam($name, $value, $isArr);
-        } else {
-            $getParams[1] = getParam($name, $value, $isArr);
-            foreach ($getParams[0] as $item) {
-                foreach ($getParams[1] as $item1) {
-                    $getParams[2][] = $isArr ? array_merge($item, $item1) : $item . '&' . $item1;
-                }
-            }
-
-            array_shift($getParams);
-            array_shift($getParams);
-        }
-    }
-
-    return $getParams[0];
 }
